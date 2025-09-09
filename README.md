@@ -18,4 +18,7 @@ En todo momento vamos a realizar ejercicios de código para demostrar el conteni
 
 - 20% Ejercicios de cada subunidad
 - 20% Ejercicios de cada unidad
+- 50% Examen trimestral
+- 10% Actitud (Comportamiento en clase + Asistencia)
+
 
