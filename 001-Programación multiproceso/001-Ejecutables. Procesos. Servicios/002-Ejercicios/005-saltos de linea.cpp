@@ -2,7 +2,9 @@
 using namespace std;
 
 int main(){
-  cout << "Hola mundo";
+  int edad = 47;
+  cout << "\n Tengo " << edad << " años \n";
+  
   return 0;
 }
 
