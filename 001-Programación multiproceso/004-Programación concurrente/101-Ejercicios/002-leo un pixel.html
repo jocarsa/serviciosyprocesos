@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Multinucleo</title>
+  </head>
+  <body>
+    <canvas></canvas>
+    <script>
+      let lienzo = document.querySelector("canvas");
+      lienzo.width = 4000;
+      lienzo.height = 6000;
+      let contexto = lienzo.getContext("2d");
+      
+      let imagen = new Image()
+      imagen.src = "josevicente.jpg";
+      
+      imagen.onload = function(){
+        contexto.drawImage(imagen,0,0);
+        let pixel = contexto.getImageData(0,0,1,1).data; // Primer pixel
+        let rojo = pixel[0]
+        let verde = pixel[1]
+        let azul = pixel[2]
+        let alpha = pixel[3]
+        console.log(rojo,verde,azul,alpha)
+      }
+      
+    </script>
+  </body>
+</html>
