@@ -1,0 +1,26 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Multinucleo</title>
+  </head>
+  <body>
+    <script>
+      let numeronucleos = navigator.hardwareConcurrency;
+      console.log("Tu ordenador tiene:",numeronucleos,"núcleos")
+      
+      let trabajadores = [];
+      
+      for(let i = 0;i<numeronucleos;i++){
+        trabajadores.push(new Worker("007-trabajador.js"));
+      }
+      
+      trabajadores.forEach(function(trabajador){
+        trabajador.postMessage("mensaje desde el jefe")
+        trabajador.onmessage = function(data){
+          console.log("Ya he terminado")
+          console.log(data)
+        }
+      })
+    </script>
+  </body>
+</html>

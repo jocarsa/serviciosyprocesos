@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Multinucleo</title>
+  </head>
+  <body>
+    <canvas></canvas>
+    <script>
+      let lienzo = document.querySelector("canvas");
+      lienzo.width = 4000;
+      lienzo.height = 6000;
+      let contexto = lienzo.getContext("2d");
+      
+      let imagen = new Image()
+      imagen.src = "josevicente.jpg";
+      
+      imagen.onload = function(){
+        contexto.drawImage(imagen,0,0)
+      }
+      
+    </script>
+  </body>
+</html>

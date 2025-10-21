@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Multinucleo</title>
+  </head>
+  <body>
+    <script>
+      let trabajador1 = new Worker("005-trabajador.js");
+      trabajador1.postMessage("empieza");
+      
+      trabajador1.onmessage = function(data){
+        console.log("El trabajador me ha respondido")
+        console.log(data)
+      }
+      
+      let trabajador2 = new Worker("005-trabajador.js");
+      trabajador2.postMessage("empieza");
+      
+      trabajador2.onmessage = function(data){
+        console.log("El trabajador me ha respondido")
+        console.log(data)
+      }
+    </script>
+  </body>
+</html>
