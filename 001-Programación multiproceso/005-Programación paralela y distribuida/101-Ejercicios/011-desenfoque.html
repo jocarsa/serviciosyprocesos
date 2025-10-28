@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Multinúcleo por buckets (cuadrados) con overlay animado</title>
+  <title>Multinúcleo por buckets (cuadrados) con overlay animado + Gaussian Blur</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root {
@@ -12,22 +12,24 @@
       --accent: #6ab0ff;
     }
     html, body { height: 100%; margin: 0; background: var(--bg); color: var(--fg); font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif; }
-    .wrap { max-width: min(95vw, 1100px); margin: 20px auto; }
+    .wrap { max-width: 1100px; margin: 20px auto; padding: 0 2vw; }
     .toolbar {
-      display: grid; grid-template-columns: 1fr auto auto auto; gap: 10px; align-items: center; margin-bottom: 12px;
+      display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; margin-bottom: 12px;
       background: #131316; border: 1px solid #232329; border-radius: 12px; padding: 12px; position: sticky; top: 10px; z-index: 5;
     }
     .toolbar .group { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-    label { color: var(--muted); font-size: 14px; }
+    label { color: var(--muted); font-size: 14px; display: inline-flex; align-items: center; gap: 6px; }
     input[type="number"] { width: 110px; }
     input, select { background: #0f0f13; color: var(--fg); border: 1px solid #2a2a33; border-radius: 10px; padding: 8px 10px; }
     button { background: var(--accent); color: #081321; border: 0; border-radius: 10px; padding: 10px 14px; font-weight: 700; cursor: pointer; }
     button.secondary { background: #232332; color: var(--fg); }
     button:disabled { opacity: .6; cursor: not-allowed; }
 
-    .stage { position: relative; display: inline-block; background: #121218; border: 1px solid #23232c; border-radius: 12px; overflow: hidden; }
-    canvas { display: block; }
+    /* Escala a pantalla: el contenedor conserva la proporción 2:3 (4000x6000) */
+    .stage { position: relative; width: min(95vw, 1100px); aspect-ratio: 2 / 3; background: #121218; border: 1px solid #23232c; border-radius: 12px; overflow: hidden; }
+    canvas { display: block; width: 100%; height: 100%; image-rendering: auto; }
     #canvasOverlay { position: absolute; inset: 0; pointer-events: none; }
+
     .legend { margin-top: 10px; color: var(--muted); font-size: 13px; }
     .legend span { display: inline-flex; align-items: center; gap: 6px; margin-right: 14px; }
     .sw { width: 16px; height: 16px; display: inline-block; border-radius: 3px; border: 1px solid #222; }
@@ -45,7 +47,12 @@
             <option value="grayscale">Escala de grises</option>
             <option value="invert">Invertir</option>
             <option value="brightness">Brillo +20%</option>
+            <option value="gaussian">Gaussian blur</option>
           </select>
+        </label>
+        <label id="gaussCtl" style="display:none;">
+          Radio blur
+          <input id="radius" type="number" min="1" max="24" value="5" />
         </label>
         <label title="Si se activa, al terminar vuelve a empezar sobre la imagen original">
           <input id="loop" type="checkbox" /> Loop
@@ -75,7 +82,7 @@
       <span><i class="sw" style="background: rgba(255,255,255,.25)"></i> Pendiente</span>
       <span><i class="sw" style="background: transparent; border:1px dashed #2a2a33"></i> Completado</span>
     </div>
-    <p class="legend">Coloca un archivo <code>josevicente.jpg</code> junto a este HTML (o cambia la ruta en el código). La imagen se dibuja a 4000×6000 px.</p>
+    <p class="legend">Coloca un archivo <code>josevicente.jpg</code> junto a este HTML (o cambia la ruta en el código). La imagen se dibuja a 4000×6000 px y se escala fluido en pantalla.</p>
   </div>
 
 <script>
@@ -93,7 +100,13 @@
   const loopChk = document.getElementById('loop');
   const fpsInput = document.getElementById('fps');
   const effectSel = document.getElementById('effect');
+  const gaussCtl = document.getElementById('gaussCtl');
+  const radiusInput = document.getElementById('radius');
   const coresLbl = document.getElementById('coresLbl');
+
+  effectSel.addEventListener('change', () => {
+    gaussCtl.style.display = effectSel.value === 'gaussian' ? 'inline-flex' : 'none';
+  });
 
   // Image setup
   const img = new Image();
@@ -101,10 +114,66 @@
 
   // Workers pool via Blob URL (no archivo extra)
   const workerURL = URL.createObjectURL(new Blob([`
+    function buildKernel(radius) {
+      const sigma = Math.max(0.1, radius / 2);
+      const size = radius * 2 + 1;
+      const kernel = new Float32Array(size);
+      const c = 1 / (Math.sqrt(2 * Math.PI) * sigma);
+      const denom = 2 * sigma * sigma;
+      let sum = 0;
+      for (let i = -radius, j = 0; i <= radius; i++, j++) {
+        const val = c * Math.exp(-(i*i) / denom);
+        kernel[j] = val; sum += val;
+      }
+      for (let j = 0; j < size; j++) kernel[j] /= sum;
+      return kernel;
+    }
+
+    function blurSeparable(src, dst, w, h, radius) {
+      const kernel = buildKernel(radius);
+      const tmp = new Uint8ClampedArray(src.length);
+      // Horizontal
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          let r=0,g=0,b=0,a=0;
+          for (let k = -radius; k <= radius; k++) {
+            const xx = Math.min(w-1, Math.max(0, x + k));
+            const idx = (y*w + xx) * 4;
+            const wgt = kernel[k+radius];
+            r += src[idx] * wgt; g += src[idx+1]*wgt; b += src[idx+2]*wgt; a += src[idx+3]*wgt;
+          }
+          const o = (y*w + x) * 4;
+          tmp[o] = r|0; tmp[o+1] = g|0; tmp[o+2] = b|0; tmp[o+3] = a|0;
+        }
+      }
+      // Vertical
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          let r=0,g=0,b=0,a=0;
+          for (let k = -radius; k <= radius; k++) {
+            const yy = Math.min(h-1, Math.max(0, y + k));
+            const idx = (yy*w + x) * 4;
+            const wgt = kernel[k+radius];
+            r += tmp[idx] * wgt; g += tmp[idx+1]*wgt; b += tmp[idx+2]*wgt; a += tmp[idx+3]*wgt;
+          }
+          const o = (y*w + x) * 4;
+          dst[o] = r|0; dst[o+1] = g|0; dst[o+2] = b|0; dst[o+3] = a|0;
+        }
+      }
+    }
+
     self.onmessage = (e) => {
-      const { jobId, dataBuf, width, height, effect } = e.data;
+      const { jobId, dataBuf, width, height, effect, radius } = e.data;
       const data = new Uint8ClampedArray(dataBuf);
-      // Procesamiento por píxel
+
+      if (effect === 'gaussian') {
+        const out = new Uint8ClampedArray(data.length);
+        blurSeparable(data, out, width, height, radius);
+        self.postMessage({ jobId, dataBuf: out.buffer }, [out.buffer]);
+        return;
+      }
+
+      // Otros efectos por píxel
       for (let i = 0; i < data.length; i += 4) {
         let r = data[i], g = data[i+1], b = data[i+2];
         if (effect === 'grayscale') {
@@ -117,10 +186,9 @@
           data[i+1] = Math.min(255, (g*1.2)|0);
           data[i+2] = Math.min(255, (b*1.2)|0);
         }
-        // alpha intacto data[i+3]
+        // alpha intacto
       }
-      // Devolver usando el mismo buffer transferible
-      self.postMessage({ jobId, dataBuf }, [data.buffer]);
+      self.postMessage({ jobId, dataBuf: data.buffer }, [data.buffer]);
     };
   `], { type: 'text/javascript' }));
 
@@ -128,7 +196,7 @@
   coresLbl.textContent = MAX_WORKERS;
 
   let workers = [];
-  let busy = new Map(); // workerIdx -> jobId
+  let busy = new Map(); // workerIdx -> job meta
   let queue = [];       // jobs pendientes
   let buckets = [];     // geometría de buckets
   let overlayTimer = null;
@@ -168,31 +236,23 @@
   }
 
   function drawOverlay() {
-    // Visual: pendiente = cuadritos ligeros; en curso = blanco; completado = limpio
     octx.clearRect(0, 0, overlay.width, overlay.height);
     // Pendientes
     octx.save();
     octx.globalAlpha = 0.25;
     octx.fillStyle = '#ffffff';
-    for (const b of buckets) {
-      if (b.status === 'pending') octx.fillRect(b.x, b.y, b.w, b.h);
-    }
+    for (const b of buckets) if (b.status === 'pending') octx.fillRect(b.x, b.y, b.w, b.h);
     octx.restore();
     // En curso
     octx.save();
     octx.globalAlpha = 0.85;
     octx.fillStyle = '#ffffff';
-    for (const b of buckets) {
-      if (b.status === 'running') octx.fillRect(b.x, b.y, b.w, b.h);
-    }
+    for (const b of buckets) if (b.status === 'running') octx.fillRect(b.x, b.y, b.w, b.h);
     octx.restore();
-
-    // Rejilla sutil (opcional)
+    // Rejilla sutil
     octx.save();
     octx.strokeStyle = 'rgba(255,255,255,0.06)';
-    for (const b of buckets) {
-      octx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1);
-    }
+    for (const b of buckets) octx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1);
     octx.restore();
   }
 
@@ -202,63 +262,89 @@
     if (overlayTimer) clearInterval(overlayTimer);
     overlayTimer = setInterval(drawOverlay, interval);
   }
-
-  function stopOverlayLoop() {
-    if (overlayTimer) clearInterval(overlayTimer);
-    overlayTimer = null;
-    drawOverlay();
-  }
+  function stopOverlayLoop() { if (overlayTimer) clearInterval(overlayTimer); overlayTimer = null; drawOverlay(); }
 
   function dispatch() {
-    // Asignar trabajos a workers libres
     for (let i = 0; i < workers.length; i++) {
-      if (busy.has(i)) continue; // worker ocupado
+      if (busy.has(i)) continue;
       const job = queue.shift();
       if (!job) break;
-      const b = job.b;
-      b.status = 'running';
-      const imgData = ctx.getImageData(b.x, b.y, b.w, b.h);
+      const b = job.b; b.status = 'running';
+
       const effect = effectSel.value;
-      // Transferimos el buffer para no copiar
-      workers[i].postMessage({ jobId: b.id, dataBuf: imgData.data.buffer, width: b.w, height: b.h, effect }, [imgData.data.buffer]);
-      busy.set(i, { jobId: b.id, x: b.x, y: b.y, w: b.w, h: b.h, generation });
+      const radius = effect === 'gaussian' ? Math.max(1, Math.min(24, +radiusInput.value||5)) : 0;
+      const pad = effect === 'gaussian' ? radius : 0; // ampliar región para evitar artefactos en bordes de bucket
+
+      const sx = Math.max(0, b.x - pad);
+      const sy = Math.max(0, b.y - pad);
+      const ex = Math.min(canvas.width, b.x + b.w + pad);
+      const ey = Math.min(canvas.height, b.y + b.h + pad);
+      const sw = ex - sx; const sh = ey - sy;
+
+      const imgData = ctx.getImageData(sx, sy, sw, sh);
+
+      workers[i].postMessage(
+        { jobId: b.id, dataBuf: imgData.data.buffer, width: sw, height: sh, effect, radius },
+        [imgData.data.buffer]
+      );
+      busy.set(i, { jobId: b.id, x: b.x, y: b.y, w: b.w, h: b.h, sx, sy, pad, generation });
     }
 
-    // Si no quedan jobs y todos libres, terminamos
     if (queue.length === 0 && busy.size === 0 && running) {
       stop();
-      if (loopChk.checked) {
-        // Relanza sobre la imagen original pintada en el canvas base
-        run();
-      }
+      if (loopChk.checked) run();
     }
   }
 
   function onWorkerMessage(workerIdx, e) {
     const meta = busy.get(workerIdx);
-    if (!meta) return; // Mensaje tardío descartado
-    if (meta.generation !== generation) return; // de un run anterior
+    if (!meta || meta.generation !== generation) return;
 
     const { dataBuf } = e.data;
-    const { x, y, w, h } = meta;
-    const out = new ImageData(new Uint8ClampedArray(dataBuf), w, h);
+    const { x, y, w, h, sx, sy, pad } = meta;
+
+    // Reconstruimos ImageData del bloque ampliado
+    const sw = (w + pad*2) - Math.max(0, sx - x) - Math.max(0, (x + w + pad) - (sx + (w + pad*2))); // pero usaremos recorte explícito abajo
+
+    const full = new Uint8ClampedArray(dataBuf);
+    // Volcamos solo el área central (sin padding) en un ImageData del tamaño del bucket
+    const out = ctx.createImageData(w, h);
+
+    const widthFull = ( (x - sx) + w + pad ); // no fiable; mejor calcular de forma directa usando sw/sh que conocíamos
+
+    // Necesitamos sw y sh exactos; recalc desde meta
+    const SW = (x - sx) + w + pad; // placeholder; corregimos con almacenado real
+
+    // Más sencillo: recomputar sw/sh a partir de buffers: no tenemos, así que calculemos usando canvas coords
+    const sw2 = (x + w + pad) - sx;
+    const sh2 = (y + h + pad) - sy;
+    const widthBuf = sw2; // anchura del buffer procesado
+
+    for (let yy = 0; yy < h; yy++) {
+      for (let xx = 0; xx < w; xx++) {
+        const srcX = (x - sx) + xx;
+        const srcY = (y - sy) + yy;
+        const si = (srcY * widthBuf + srcX) * 4;
+        const di = (yy * w + xx) * 4;
+        out.data[di]   = full[si];
+        out.data[di+1] = full[si+1];
+        out.data[di+2] = full[si+2];
+        out.data[di+3] = full[si+3];
+      }
+    }
+
     ctx.putImageData(out, x, y);
 
-    // Marcar bucket completado
     const b = buckets.find(bb => bb.id === meta.jobId);
     if (b) b.status = 'done';
 
     busy.delete(workerIdx);
-    dispatch(); // seguir alimentando la cola
+    dispatch();
   }
 
   function run() {
-    if (!img.complete) {
-      alert('La imagen aún no está cargada.');
-      return;
-    }
-    running = true;
-    generation++;
+    if (!img.complete) { alert('La imagen aún no está cargada.'); return; }
+    running = true; generation++;
     startBtn.disabled = true; stopBtn.disabled = false; resetBtn.disabled = true;
 
     // Redibujar la imagen original (para loops)
@@ -268,7 +354,6 @@
     buckets = buildBuckets(size);
     queueBuckets();
 
-    // Inicializar overlay y lanzar
     startOverlayLoop();
     dispatch();
   }
@@ -280,27 +365,18 @@
   }
 
   function reset() {
-    // Limpia overlays y vuelve a dibujar imagen original
     octx.clearRect(0, 0, overlay.width, overlay.height);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (img.complete) ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     buckets.length = 0; queue.length = 0; busy.clear();
   }
 
-  // Wire UI
   startBtn.addEventListener('click', () => { if (!running) run(); });
   stopBtn.addEventListener('click', () => { if (running) stop(); });
   resetBtn.addEventListener('click', reset);
 
-  // Init
   makeWorkers();
-  img.onload = () => {
-    // Dibuja imagen de base
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    drawOverlay();
-  };
-
-  // Limpieza al cerrar
+  img.onload = () => { ctx.drawImage(img, 0, 0, canvas.width, canvas.height); drawOverlay(); };
   window.addEventListener('beforeunload', () => { destroyWorkers(); if (workerURL) URL.revokeObjectURL(workerURL); });
 })();
 </script>
