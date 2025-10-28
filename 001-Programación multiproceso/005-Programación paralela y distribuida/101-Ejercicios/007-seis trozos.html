@@ -1,0 +1,120 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Multinucleo</title>
+  </head>
+  <body>
+    <canvas></canvas>
+    <script>
+      let lienzo = document.querySelector("canvas");
+      lienzo.width = 4000;
+      lienzo.height = 6000;
+      let contexto = lienzo.getContext("2d");
+      
+      let imagen = new Image()
+      imagen.src = "josevicente.jpg";
+      
+      imagen.onload = function(){
+        contexto.drawImage(imagen,0,0);
+        
+        let trabajador1 = new Worker("procesaimagen.js");
+        let trabajador2 = new Worker("procesaimagen.js");
+        let trabajador3 = new Worker("procesaimagen.js");
+        let trabajador4 = new Worker("procesaimagen.js");
+        let trabajador5 = new Worker("procesaimagen.js");
+        let trabajador6 = new Worker("procesaimagen.js");
+        
+        ////////////////////////// TROZO 1
+        let trozo1 = contexto.getImageData(0,0,4000,1000).data; // Cojo el trozo de arriba
+        trabajador1.postMessage(trozo1)                 // Al trabajador 1 le envio informacion
+        
+        trabajador1.onmessage = function(datos){
+          console.log(datos.data)
+          let origen = contexto.getImageData(0,0,4000,1000)
+          for(let i = 0;i<origen.data.length;i+=4){
+            origen.data[i] = datos.data[i]
+            origen.data[i+1] = datos.data[i+1]
+            origen.data[i+2] = datos.data[i+2]
+          }
+          contexto.putImageData(origen,0,0)
+        }
+        
+        ////////////////////////// TROZO 2
+        let trozo2 = contexto.getImageData(0,1000,4000,2000).data; // Cojo el trozo de arriba
+        trabajador2.postMessage(trozo2)                 // Al trabajador 1 le envio informacion
+        
+        trabajador2.onmessage = function(datos){
+          console.log(datos.data)
+          let origen = contexto.getImageData(0,1000,4000,2000)
+          for(let i = 0;i<origen.data.length;i+=4){
+            origen.data[i] = datos.data[i]
+            origen.data[i+1] = datos.data[i+1]
+            origen.data[i+2] = datos.data[i+2]
+          }
+          contexto.putImageData(origen,0,1000)
+        }
+        
+        ////////////////////////// TROZO 3
+        let trozo3 = contexto.getImageData(0,2000,4000,3000).data; // Cojo el trozo de arriba
+        trabajador3.postMessage(trozo3)                 // Al trabajador 1 le envio informacion
+        
+        trabajador3.onmessage = function(datos){
+          console.log(datos.data)
+          let origen = contexto.getImageData(0,2000,4000,3000)
+          for(let i = 0;i<origen.data.length;i+=4){
+            origen.data[i] = datos.data[i]
+            origen.data[i+1] = datos.data[i+1]
+            origen.data[i+2] = datos.data[i+2]
+          }
+          contexto.putImageData(origen,0,2000)
+        }
+        
+        ////////////////////////// TROZO 4
+        let trozo4 = contexto.getImageData(0,3000,4000,4000).data; // Cojo el trozo de arriba
+        trabajador4.postMessage(trozo4)                 // Al trabajador 1 le envio informacion
+        
+        trabajador4.onmessage = function(datos){
+          console.log(datos.data)
+          let origen = contexto.getImageData(0,3000,4000,4000)
+          for(let i = 0;i<origen.data.length;i+=4){
+            origen.data[i] = datos.data[i]
+            origen.data[i+1] = datos.data[i+1]
+            origen.data[i+2] = datos.data[i+2]
+          }
+          contexto.putImageData(origen,0,3000)
+        }
+        
+        ////////////////////////// TROZO 5
+        let trozo5 = contexto.getImageData(0,4000,4000,5000).data; // Cojo el trozo de arriba
+        trabajador5.postMessage(trozo5)                 // Al trabajador 1 le envio informacion
+        
+        trabajador5.onmessage = function(datos){
+          console.log(datos.data)
+          let origen = contexto.getImageData(0,4000,4000,5000)
+          for(let i = 0;i<origen.data.length;i+=4){
+            origen.data[i] = datos.data[i]
+            origen.data[i+1] = datos.data[i+1]
+            origen.data[i+2] = datos.data[i+2]
+          }
+          contexto.putImageData(origen,0,4000)
+        }
+        
+        ////////////////////////// TROZO 6
+        let trozo6 = contexto.getImageData(0,5000,4000,6000).data; // Cojo el trozo de arriba
+        trabajador6.postMessage(trozo6)                 // Al trabajador 1 le envio informacion
+        
+        trabajador6.onmessage = function(datos){
+          console.log(datos.data)
+          let origen = contexto.getImageData(0,5000,4000,6000)
+          for(let i = 0;i<origen.data.length;i+=4){
+            origen.data[i] = datos.data[i]
+            origen.data[i+1] = datos.data[i+1]
+            origen.data[i+2] = datos.data[i+2]
+          }
+          contexto.putImageData(origen,0,5000)
+        }
+      }
+      
+    </script>
+  </body>
+</html>
