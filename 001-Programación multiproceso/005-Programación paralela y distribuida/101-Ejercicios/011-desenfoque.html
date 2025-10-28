@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Multinúcleo por buckets (cuadrados) con overlay animado</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --bg: #0b0b0c;
+      --fg: #e7e7ea;
+      --muted: #9aa0a6;
+      --accent: #6ab0ff;
+    }
+    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--fg); font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif; }
+    .wrap { max-width: min(95vw, 1100px); margin: 20px auto; }
+    .toolbar {
+      display: grid; grid-template-columns: 1fr auto auto auto; gap: 10px; align-items: center; margin-bottom: 12px;
+      background: #131316; border: 1px solid #232329; border-radius: 12px; padding: 12px; position: sticky; top: 10px; z-index: 5;
+    }
+    .toolbar .group { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    label { color: var(--muted); font-size: 14px; }
+    input[type="number"] { width: 110px; }
+    input, select { background: #0f0f13; color: var(--fg); border: 1px solid #2a2a33; border-radius: 10px; padding: 8px 10px; }
+    button { background: var(--accent); color: #081321; border: 0; border-radius: 10px; padding: 10px 14px; font-weight: 700; cursor: pointer; }
+    button.secondary { background: #232332; color: var(--fg); }
+    button:disabled { opacity: .6; cursor: not-allowed; }
+
+    .stage { position: relative; display: inline-block; background: #121218; border: 1px solid #23232c; border-radius: 12px; overflow: hidden; }
+    canvas { display: block; }
+    #canvasOverlay { position: absolute; inset: 0; pointer-events: none; }
+    .legend { margin-top: 10px; color: var(--muted); font-size: 13px; }
+    .legend span { display: inline-flex; align-items: center; gap: 6px; margin-right: 14px; }
+    .sw { width: 16px; height: 16px; display: inline-block; border-radius: 3px; border: 1px solid #222; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="toolbar">
+      <div class="group">
+        <label>Bucket (lado px)
+          <input id="bucket" type="number" min="16" step="16" value="256" />
+        </label>
+        <label>Efecto
+          <select id="effect">
+            <option value="grayscale">Escala de grises</option>
+            <option value="invert">Invertir</option>
+            <option value="brightness">Brillo +20%</option>
+          </select>
+        </label>
+        <label title="Si se activa, al terminar vuelve a empezar sobre la imagen original">
+          <input id="loop" type="checkbox" /> Loop
+        </label>
+        <label title="Más alto = más rápido refresco del overlay">
+          FPS overlay
+          <input id="fps" type="number" min="5" max="60" value="30" />
+        </label>
+      </div>
+      <div class="group">
+        <button id="startBtn">Iniciar</button>
+        <button id="stopBtn" class="secondary" disabled>Detener</button>
+        <button id="resetBtn" class="secondary">Reset</button>
+      </div>
+      <div style="justify-self:end; text-align:right; color:var(--muted); font-size: 13px;">
+        Núcleos disponibles: <strong id="coresLbl">?</strong>
+      </div>
+    </div>
+
+    <div class="stage">
+      <canvas id="canvasMain" width="4000" height="6000"></canvas>
+      <canvas id="canvasOverlay" width="4000" height="6000"></canvas>
+    </div>
+
+    <div class="legend">
+      <span><i class="sw" style="background: rgba(255,255,255,.85)"></i> Calculando</span>
+      <span><i class="sw" style="background: rgba(255,255,255,.25)"></i> Pendiente</span>
+      <span><i class="sw" style="background: transparent; border:1px dashed #2a2a33"></i> Completado</span>
+    </div>
+    <p class="legend">Coloca un archivo <code>josevicente.jpg</code> junto a este HTML (o cambia la ruta en el código). La imagen se dibuja a 4000×6000 px.</p>
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('canvasMain');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const overlay = document.getElementById('canvasOverlay');
+  const octx = overlay.getContext('2d');
+
+  // UI
+  const bucketInput = document.getElementById('bucket');
+  const startBtn = document.getElementById('startBtn');
+  const stopBtn = document.getElementById('stopBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const loopChk = document.getElementById('loop');
+  const fpsInput = document.getElementById('fps');
+  const effectSel = document.getElementById('effect');
+  const coresLbl = document.getElementById('coresLbl');
+
+  // Image setup
+  const img = new Image();
+  img.src = 'josevicente.jpg';
+
+  // Workers pool via Blob URL (no archivo extra)
+  const workerURL = URL.createObjectURL(new Blob([`
+    self.onmessage = (e) => {
+      const { jobId, dataBuf, width, height, effect } = e.data;
+      const data = new Uint8ClampedArray(dataBuf);
+      // Procesamiento por píxel
+      for (let i = 0; i < data.length; i += 4) {
+        let r = data[i], g = data[i+1], b = data[i+2];
+        if (effect === 'grayscale') {
+          const y = (0.2126*r + 0.7152*g + 0.0722*b) | 0; 
+          data[i] = data[i+1] = data[i+2] = y;
+        } else if (effect === 'invert') {
+          data[i] = 255 - r; data[i+1] = 255 - g; data[i+2] = 255 - b;
+        } else if (effect === 'brightness') {
+          data[i] = Math.min(255, (r*1.2)|0);
+          data[i+1] = Math.min(255, (g*1.2)|0);
+          data[i+2] = Math.min(255, (b*1.2)|0);
+        }
+        // alpha intacto data[i+3]
+      }
+      // Devolver usando el mismo buffer transferible
+      self.postMessage({ jobId, dataBuf }, [data.buffer]);
+    };
+  `], { type: 'text/javascript' }));
+
+  const MAX_WORKERS = Math.max(1, Math.min((navigator.hardwareConcurrency||4), 16));
+  coresLbl.textContent = MAX_WORKERS;
+
+  let workers = [];
+  let busy = new Map(); // workerIdx -> jobId
+  let queue = [];       // jobs pendientes
+  let buckets = [];     // geometría de buckets
+  let overlayTimer = null;
+  let running = false;
+  let generation = 0;   // para cancelar runs antiguos
+
+  function makeWorkers() {
+    destroyWorkers();
+    for (let i = 0; i < MAX_WORKERS; i++) {
+      const w = new Worker(workerURL);
+      w.onmessage = onWorkerMessage.bind(null, i);
+      workers.push(w);
+    }
+  }
+  function destroyWorkers() {
+    for (const w of workers) w.terminate();
+    workers = []; busy.clear();
+  }
+
+  function buildBuckets(size) {
+    const W = canvas.width, H = canvas.height;
+    const out = [];
+    let id = 0;
+    for (let y = 0; y < H; y += size) {
+      for (let x = 0; x < W; x += size) {
+        const w = Math.min(size, W - x);
+        const h = Math.min(size, H - y);
+        out.push({ id: id++, x, y, w, h, status: 'pending' });
+      }
+    }
+    return out;
+  }
+
+  function queueBuckets() {
+    queue.length = 0;
+    for (const b of buckets) queue.push({ type: 'bucket', b });
+  }
+
+  function drawOverlay() {
+    // Visual: pendiente = cuadritos ligeros; en curso = blanco; completado = limpio
+    octx.clearRect(0, 0, overlay.width, overlay.height);
+    // Pendientes
+    octx.save();
+    octx.globalAlpha = 0.25;
+    octx.fillStyle = '#ffffff';
+    for (const b of buckets) {
+      if (b.status === 'pending') octx.fillRect(b.x, b.y, b.w, b.h);
+    }
+    octx.restore();
+    // En curso
+    octx.save();
+    octx.globalAlpha = 0.85;
+    octx.fillStyle = '#ffffff';
+    for (const b of buckets) {
+      if (b.status === 'running') octx.fillRect(b.x, b.y, b.w, b.h);
+    }
+    octx.restore();
+
+    // Rejilla sutil (opcional)
+    octx.save();
+    octx.strokeStyle = 'rgba(255,255,255,0.06)';
+    for (const b of buckets) {
+      octx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1);
+    }
+    octx.restore();
+  }
+
+  function startOverlayLoop() {
+    const fps = Math.max(5, Math.min(60, +fpsInput.value||30));
+    const interval = 1000 / fps;
+    if (overlayTimer) clearInterval(overlayTimer);
+    overlayTimer = setInterval(drawOverlay, interval);
+  }
+
+  function stopOverlayLoop() {
+    if (overlayTimer) clearInterval(overlayTimer);
+    overlayTimer = null;
+    drawOverlay();
+  }
+
+  function dispatch() {
+    // Asignar trabajos a workers libres
+    for (let i = 0; i < workers.length; i++) {
+      if (busy.has(i)) continue; // worker ocupado
+      const job = queue.shift();
+      if (!job) break;
+      const b = job.b;
+      b.status = 'running';
+      const imgData = ctx.getImageData(b.x, b.y, b.w, b.h);
+      const effect = effectSel.value;
+      // Transferimos el buffer para no copiar
+      workers[i].postMessage({ jobId: b.id, dataBuf: imgData.data.buffer, width: b.w, height: b.h, effect }, [imgData.data.buffer]);
+      busy.set(i, { jobId: b.id, x: b.x, y: b.y, w: b.w, h: b.h, generation });
+    }
+
+    // Si no quedan jobs y todos libres, terminamos
+    if (queue.length === 0 && busy.size === 0 && running) {
+      stop();
+      if (loopChk.checked) {
+        // Relanza sobre la imagen original pintada en el canvas base
+        run();
+      }
+    }
+  }
+
+  function onWorkerMessage(workerIdx, e) {
+    const meta = busy.get(workerIdx);
+    if (!meta) return; // Mensaje tardío descartado
+    if (meta.generation !== generation) return; // de un run anterior
+
+    const { dataBuf } = e.data;
+    const { x, y, w, h } = meta;
+    const out = new ImageData(new Uint8ClampedArray(dataBuf), w, h);
+    ctx.putImageData(out, x, y);
+
+    // Marcar bucket completado
+    const b = buckets.find(bb => bb.id === meta.jobId);
+    if (b) b.status = 'done';
+
+    busy.delete(workerIdx);
+    dispatch(); // seguir alimentando la cola
+  }
+
+  function run() {
+    if (!img.complete) {
+      alert('La imagen aún no está cargada.');
+      return;
+    }
+    running = true;
+    generation++;
+    startBtn.disabled = true; stopBtn.disabled = false; resetBtn.disabled = true;
+
+    // Redibujar la imagen original (para loops)
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+    const size = Math.max(16, +bucketInput.value || 256);
+    buckets = buildBuckets(size);
+    queueBuckets();
+
+    // Inicializar overlay y lanzar
+    startOverlayLoop();
+    dispatch();
+  }
+
+  function stop() {
+    running = false;
+    startBtn.disabled = false; stopBtn.disabled = true; resetBtn.disabled = false;
+    stopOverlayLoop();
+  }
+
+  function reset() {
+    // Limpia overlays y vuelve a dibujar imagen original
+    octx.clearRect(0, 0, overlay.width, overlay.height);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (img.complete) ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    buckets.length = 0; queue.length = 0; busy.clear();
+  }
+
+  // Wire UI
+  startBtn.addEventListener('click', () => { if (!running) run(); });
+  stopBtn.addEventListener('click', () => { if (running) stop(); });
+  resetBtn.addEventListener('click', reset);
+
+  // Init
+  makeWorkers();
+  img.onload = () => {
+    // Dibuja imagen de base
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    drawOverlay();
+  };
+
+  // Limpieza al cerrar
+  window.addEventListener('beforeunload', () => { destroyWorkers(); if (workerURL) URL.revokeObjectURL(workerURL); });
+})();
+</script>
+</body>
+</html>
