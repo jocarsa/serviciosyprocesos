@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Multinúcleo por buckets + overlay animado (efectos acumulativos + Sobel)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --bg:#0b0b0c; --fg:#e7e7ea; --muted:#9aa0a6; --accent:#6ab0ff; }
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif}
+    .wrap{max-width:1100px;margin:20px auto;padding:0 2vw}
+    .toolbar{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;margin-bottom:12px;background:#131316;border:1px solid #232329;border-radius:12px;padding:12px;position:sticky;top:10px;z-index:5}
+    .toolbar .group{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    label{color:var(--muted);font-size:14px;display:inline-flex;align-items:center;gap:6px}
+    input[type="number"]{width:110px}
+    input,select{background:#0f0f13;color:var(--fg);border:1px solid #2a2a33;border-radius:10px;padding:8px 10px}
+    button{background:var(--accent);color:#081321;border:0;border-radius:10px;padding:10px 14px;font-weight:700;cursor:pointer}
+    button.secondary{background:#232332;color:var(--fg)}
+    button:disabled{opacity:.6;cursor:not-allowed}
+    .stage{position:relative;width:min(95vw,1100px);aspect-ratio:2/3;background:#121218;border:1px solid #23232c;border-radius:12px;overflow:hidden}
+    canvas{display:block;width:100%;height:100%;image-rendering:auto}
+    #canvasOverlay{position:absolute;inset:0;pointer-events:none}
+    .legend{margin-top:10px;color:var(--muted);font-size:13px}
+    .legend span{display:inline-flex;align-items:center;gap:6px;margin-right:14px}
+    .sw{width:16px;height:16px;display:inline-block;border-radius:3px;border:1px solid #222}
+    .checks{display:flex;gap:12px;flex-wrap:wrap}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="toolbar">
+      <div class="group">
+        <label>Bucket (lado px)
+          <input id="bucket" type="number" min="16" step="16" value="256" />
+        </label>
+        <div class="checks">
+          <label><input id="chkGray" type="checkbox"> Grayscale</label>
+          <label><input id="chkInvert" type="checkbox"> Invert</label>
+          <label><input id="chkBright" type="checkbox" checked> Brightness +20%</label>
+          <label><input id="chkBlur" type="checkbox"> Gaussian blur</label>
+          <label id="gaussCtl" style="display:none;">
+            Radio
+            <input id="radius" type="number" min="1" max="24" value="5" />
+          </label>
+          <label><input id="chkSobel" type="checkbox"> Find edges (Sobel)</label>
+        </div>
+        <label title="Si se activa, al terminar vuelve a empezar sobre la imagen original">
+          <input id="loop" type="checkbox" /> Loop
+        </label>
+        <label title="Más alto = más rápido refresco del overlay">
+          FPS overlay
+          <input id="fps" type="number" min="5" max="60" value="30" />
+        </label>
+      </div>
+      <div class="group">
+        <button id="startBtn">Iniciar</button>
+        <button id="stopBtn" class="secondary" disabled>Detener</button>
+        <button id="resetBtn" class="secondary">Reset</button>
+      </div>
+      <div style="justify-self:end;text-align:right;color:var(--muted);font-size:13px;">
+        Núcleos disponibles: <strong id="coresLbl">?</strong>
+      </div>
+    </div>
+
+    <div class="stage">
+      <canvas id="canvasMain" width="4000" height="6000"></canvas>
+      <canvas id="canvasOverlay" width="4000" height="6000"></canvas>
+    </div>
+
+    <div class="legend">
+      <span><i class="sw" style="background: rgba(255,255,255,.85)"></i> Calculando</span>
+      <span><i class="sw" style="background: rgba(255,255,255,.25)"></i> Pendiente</span>
+      <span><i class="sw" style="background: transparent; border:1px dashed #2a2a33"></i> Completado</span>
+    </div>
+    <p class="legend">Coloca un archivo <code>josevicente.jpg</code> junto a este HTML (o cambia la ruta en el código). La imagen se dibuja a 4000×6000 px y se escala fluido en pantalla.</p>
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('canvasMain');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const overlay = document.getElementById('canvasOverlay');
+  const octx = overlay.getContext('2d');
+
+  // UI
+  const bucketInput = document.getElementById('bucket');
+  const startBtn = document.getElementById('startBtn');
+  const stopBtn = document.getElementById('stopBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const loopChk = document.getElementById('loop');
+  const fpsInput = document.getElementById('fps');
+  const coresLbl = document.getElementById('coresLbl');
+
+  const chkGray = document.getElementById('chkGray');
+  const chkInvert = document.getElementById('chkInvert');
+  const chkBright = document.getElementById('chkBright');
+  const chkBlur = document.getElementById('chkBlur');
+  const radiusInput = document.getElementById('radius');
+  const gaussCtl = document.getElementById('gaussCtl');
+  const chkSobel = document.getElementById('chkSobel');
+
+  chkBlur.addEventListener('change', () => { gaussCtl.style.display = chkBlur.checked ? 'inline-flex' : 'none'; });
+
+  // Image setup
+  const img = new Image();
+  img.src = 'josevicente.jpg';
+
+  // Workers pool via Blob URL (no archivo extra)
+  const workerURL = URL.createObjectURL(new Blob([`
+    function clamp255(v){ return v < 0 ? 0 : v > 255 ? 255 : v|0; }
+
+    function buildKernel(radius) {
+      const sigma = Math.max(0.1, radius / 2);
+      const size = radius * 2 + 1;
+      const kernel = new Float32Array(size);
+      const c = 1 / (Math.sqrt(2 * Math.PI) * sigma);
+      const denom = 2 * sigma * sigma;
+      let sum = 0;
+      for (let i = -radius, j = 0; i <= radius; i++, j++) {
+        const val = c * Math.exp(-(i*i) / denom);
+        kernel[j] = val; sum += val;
+      }
+      for (let j = 0; j < size; j++) kernel[j] /= sum;
+      return kernel;
+    }
+
+    function blurSeparable(src, dst, w, h, radius) {
+      const kernel = buildKernel(radius);
+      const tmp = new Float32Array(src.length);
+      // Horizontal
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          let r=0,g=0,b=0,a=0;
+          for (let k = -radius; k <= radius; k++) {
+            const xx = Math.min(w-1, Math.max(0, x + k));
+            const idx = (y*w + xx) * 4;
+            const wgt = kernel[k+radius];
+            r += src[idx] * wgt; g += src[idx+1]*wgt; b += src[idx+2]*wgt; a += src[idx+3]*wgt;
+          }
+          const o = (y*w + x) * 4;
+          tmp[o] = r; tmp[o+1] = g; tmp[o+2] = b; tmp[o+3] = a;
+        }
+      }
+      // Vertical
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          let r=0,g=0,b=0,a=0;
+          for (let k = -radius; k <= radius; k++) {
+            const yy = Math.min(h-1, Math.max(0, y + k));
+            const idx = (yy*w + x) * 4;
+            const wgt = kernel[k+radius];
+            r += tmp[idx] * wgt; g += tmp[idx+1]*wgt; b += tmp[idx+2]*wgt; a += tmp[idx+3]*wgt;
+          }
+          const o = (y*w + x) * 4;
+          dst[o] = clamp255(r); dst[o+1] = clamp255(g); dst[o+2] = clamp255(b); dst[o+3] = clamp255(a);
+        }
+      }
+    }
+
+    function toLuma(src, w, h) {
+      const L = new Float32Array(w*h);
+      for (let y=0, i=0, p=0; y<h; y++){
+        for (let x=0; x<w; x++, i++, p+=4){
+          const r=src[p], g=src[p+1], b=src[p+2];
+          L[i] = 0.2126*r + 0.7152*g + 0.0722*b;
+        }
+      }
+      return L;
+    }
+
+    function sobelEdges(srcRGBA, w, h) {
+      // srcRGBA: Uint8ClampedArray
+      const L = toLuma(srcRGBA, w, h);
+      const out = new Uint8ClampedArray(w*h*4);
+      const gxK = [-1,0,1,-2,0,2,-1,0,1];
+      const gyK = [-1,-2,-1,0,0,0,1,2,1];
+      for (let y=0; y<h; y++){
+        for (let x=0; x<w; x++){
+          let gx=0, gy=0;
+          for (let ky=-1; ky<=1; ky++){
+            for (let kx=-1; kx<=1; kx++){
+              const xx = Math.min(w-1, Math.max(0, x+kx));
+              const yy = Math.min(h-1, Math.max(0, y+ky));
+              const wIdx = (ky+1)*3 + (kx+1);
+              const v = L[yy*w + xx];
+              gx += v * gxK[wIdx];
+              gy += v * gyK[wIdx];
+            }
+          }
+          const mag = clamp255(Math.hypot(gx, gy));
+          const i = (y*w + x)*4;
+          out[i]=out[i+1]=out[i+2]=mag; out[i+3]=255;
+        }
+      }
+      return out;
+    }
+
+    self.onmessage = (e) => {
+      const { jobId, dataBuf, width, height, effects } = e.data;
+      let cur = new Uint8ClampedArray(dataBuf);
+
+      if (effects.gray) {
+        for (let i=0;i<cur.length;i+=4){
+          const y = (0.2126*cur[i] + 0.7152*cur[i+1] + 0.0722*cur[i+2])|0;
+          cur[i]=cur[i+1]=cur[i+2]=y;
+        }
+      }
+      if (effects.invert) {
+        for (let i=0;i<cur.length;i+=4){
+          cur[i]=255-cur[i]; cur[i+1]=255-cur[i+1]; cur[i+2]=255-cur[i+2];
+        }
+      }
+      if (effects.bright) {
+        for (let i=0;i<cur.length;i+=4){
+          cur[i]=clamp255(cur[i]*1.2); cur[i+1]=clamp255(cur[i+1]*1.2); cur[i+2]=clamp255(cur[i+2]*1.2);
+        }
+      }
+      if (effects.blur) {
+        const blurred = new Uint8ClampedArray(cur.length);
+        blurSeparable(cur, blurred, width, height, effects.radius);
+        cur = blurred;
+      }
+      if (effects.sobel) {
+        cur = sobelEdges(cur, width, height);
+      }
+
+      self.postMessage({ jobId, dataBuf: cur.buffer }, [cur.buffer]);
+    };
+  `], { type: 'text/javascript' }));
+
+  const MAX_WORKERS = Math.max(1, Math.min((navigator.hardwareConcurrency||4), 16));
+  coresLbl.textContent = MAX_WORKERS;
+
+  let workers = [];
+  let busy = new Map(); // workerIdx -> job meta
+  let queue = [];       // jobs pendientes
+  let buckets = [];     // geometría de buckets
+  let overlayTimer = null;
+  let running = false;
+  let generation = 0;   // para cancelar runs antiguos
+
+  function makeWorkers() {
+    destroyWorkers();
+    for (let i = 0; i < MAX_WORKERS; i++) {
+      const w = new Worker(workerURL);
+      w.onmessage = onWorkerMessage.bind(null, i);
+      workers.push(w);
+    }
+  }
+  function destroyWorkers() { for (const w of workers) w.terminate(); workers = []; busy.clear(); }
+
+  function buildBuckets(size) {
+    const W = canvas.width, H = canvas.height;
+    const out = []; let id = 0;
+    for (let y = 0; y < H; y += size) {
+      for (let x = 0; x < W; x += size) {
+        const w = Math.min(size, W - x);
+        const h = Math.min(size, H - y);
+        out.push({ id: id++, x, y, w, h, status: 'pending' });
+      }
+    }
+    return out;
+  }
+
+  function queueBuckets() { queue.length = 0; for (const b of buckets) queue.push({ b }); }
+
+  function drawOverlay() {
+    octx.clearRect(0, 0, overlay.width, overlay.height);
+    octx.save(); octx.globalAlpha=.25; octx.fillStyle='#ffffff';
+    for (const b of buckets) if (b.status==='pending') octx.fillRect(b.x,b.y,b.w,b.h); octx.restore();
+    octx.save(); octx.globalAlpha=.85; octx.fillStyle='#ffffff';
+    for (const b of buckets) if (b.status==='running') octx.fillRect(b.x,b.y,b.w,b.h); octx.restore();
+    octx.save(); octx.strokeStyle='rgba(255,255,255,0.06)';
+    for (const b of buckets) octx.strokeRect(b.x+.5,b.y+.5,b.w-1,b.h-1); octx.restore();
+  }
+
+  function startOverlayLoop(){ const fps=Math.max(5,Math.min(60,+fpsInput.value||30)); if(overlayTimer)clearInterval(overlayTimer); overlayTimer=setInterval(drawOverlay, 1000/fps); }
+  function stopOverlayLoop(){ if(overlayTimer)clearInterval(overlayTimer); overlayTimer=null; drawOverlay(); }
+
+  function currentEffects(){
+    const fx = {
+      gray: !!chkGray.checked,
+      invert: !!chkInvert.checked,
+      bright: !!chkBright.checked,
+      blur: !!chkBlur.checked,
+      radius: Math.max(1, Math.min(24, +radiusInput.value||5)),
+      sobel: !!chkSobel.checked,
+    };
+    return fx;
+  }
+
+  function requiredPadding(fx){
+    let pad = 0;
+    if (fx.blur) pad = Math.max(pad, fx.radius);
+    if (fx.sobel) pad = Math.max(pad, 1);
+    return pad;
+  }
+
+  function dispatch() {
+    for (let i = 0; i < workers.length; i++) {
+      if (busy.has(i)) continue;
+      const job = queue.shift();
+      if (!job) break;
+      const b = job.b; b.status='running';
+
+      const effects = currentEffects();
+      const pad = requiredPadding(effects);
+
+      const sx = Math.max(0, b.x - pad);
+      const sy = Math.max(0, b.y - pad);
+      const ex = Math.min(canvas.width,  b.x + b.w + pad);
+      const ey = Math.min(canvas.height, b.y + b.h + pad);
+      const sw = ex - sx, sh = ey - sy;
+      const ox = b.x - sx, oy = b.y - sy; // offset dentro del buffer
+
+      const imgData = ctx.getImageData(sx, sy, sw, sh);
+
+      workers[i].postMessage(
+        { jobId: b.id, dataBuf: imgData.data.buffer, width: sw, height: sh, effects },
+        [imgData.data.buffer]
+      );
+      busy.set(i, { jobId: b.id, x:b.x, y:b.y, w:b.w, h:b.h, sx, sy, sw, sh, ox, oy, generation });
+    }
+
+    if (queue.length === 0 && busy.size === 0 && running) {
+      stop(); if (loopChk.checked) run();
+    }
+  }
+
+  function onWorkerMessage(workerIdx, e) {
+    const meta = busy.get(workerIdx);
+    if (!meta || meta.generation !== generation) return;
+
+    const { dataBuf } = e.data;
+    const full = new Uint8ClampedArray(dataBuf); // tamaño sw*sh*4
+    const { x,y,w,h, sw, sh, ox, oy } = meta;
+
+    const out = ctx.createImageData(w, h);
+    for (let yy=0; yy<h; yy++){
+      const srcRow = (oy + yy) * sw;
+      const dstRow = yy * w;
+      for (let xx=0; xx<w; xx++){
+        const si = (srcRow + (ox + xx)) * 4;
+        const di = (dstRow + xx) * 4;
+        out.data[di]   = full[si];
+        out.data[di+1] = full[si+1];
+        out.data[di+2] = full[si+2];
+        out.data[di+3] = full[si+3];
+      }
+    }
+
+    ctx.putImageData(out, x, y);
+
+    const b = buckets.find(bb => bb.id === meta.jobId);
+    if (b) b.status = 'done';
+
+    busy.delete(workerIdx);
+    dispatch();
+  }
+
+  function run() {
+    if (!img.complete) { alert('La imagen aún no está cargada.'); return; }
+    running = true; generation++;
+    startBtn.disabled = true; stopBtn.disabled = false; resetBtn.disabled = true;
+
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height); // base para loops
+
+    const size = Math.max(16, +bucketInput.value || 256);
+    buckets = buildBuckets(size);
+    queueBuckets();
+
+    startOverlayLoop();
+    dispatch();
+  }
+
+  function stop(){ running=false; startBtn.disabled=false; stopBtn.disabled=true; resetBtn.disabled=false; stopOverlayLoop(); }
+  function reset(){ octx.clearRect(0,0,overlay.width,overlay.height); ctx.clearRect(0,0,canvas.width,canvas.height); if(img.complete) ctx.drawImage(img,0,0,canvas.width,canvas.height); buckets.length=0; queue.length=0; busy.clear(); }
+
+  startBtn.addEventListener('click', () => { if (!running) run(); });
+  stopBtn.addEventListener('click', () => { if (running) stop(); });
+  resetBtn.addEventListener('click', reset);
+
+  makeWorkers();
+  img.onload = () => { ctx.drawImage(img, 0, 0, canvas.width, canvas.height); drawOverlay(); };
+  window.addEventListener('beforeunload', () => { destroyWorkers(); if (workerURL) URL.revokeObjectURL(workerURL); });
+})();
+</script>
+</body>
+</html>

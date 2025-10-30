@@ -1,24 +1,29 @@
-# serviciosyprocesos
+# Informe de 101-Ejercicios (Unidad/Subunidad)
 
-Prof. Jose Vicente Carratala
+_Base:_ `/var/www/html/serviciosyprocesos`
+_Generado:_ 2025-10-30
+_Modelo Ollama:_ `llama3.1:8b-instruct-q4_0`
 
-Python es un lenguaje interpretado
+## Unidad: `000-Prerrequisitos`
+- `001-Variables` — 2025-09-16
+  - **Resumen:** En la clase de variables, se abordó el concepto fundamental de declaración y uso de variables en C++. Se aprendió a asignar valores a variables utilizando operadores de asignación, así como a realizar salidas por pantalla concatenando strings con los valores de las variables. También se exploraron los diferentes tipos de datos disponibles en C++, tales como enteros, flotantes, dobles y booleanos, y cómo utilizarlas para almacenar información precisa según el contexto del programa.
+- `002-Operadores` — 2025-09-16
+  - **Resumen:** En la clase de operadores, se presentaron y aplicaron diferentes tipos de operadores en programación, tales como los operadores aritméticos (+, -, *, /), que permiten realizar cálculos básicos con números. También se abordaron los operadores de comparación (<, >, ==, !=, <=, >=), utilizados para evaluar la igualdad o desigualdad entre dos valores. Además, se estudiaron los operadores de incremento y decremento (++ y --) que permiten aumentar o disminuir en uno el valor de una variable. Por último, se introdujeron los operadores aritméticos abreviados (+=, -=, *=, /=), que ofrecen una forma más eficiente de realizar ciertas operaciones. Estos conceptos son fundamentales para cualquier programa que involucre la manipulación y el tratamiento de datos numéricos.
+- `003-Estructuras de control` — 2025-09-16 → 2025-09-23
+  - **Resumen:** _No disponible_
+- `004-Funciones` — 2025-09-16
+  - **Resumen:** En la clase de funciones, se exploró cómo utilizarlas para realizar operaciones matemáticas y mejorar la estructura y legibilidad del código. Se aprendió a crear funciones que toman argumentos y devuelven resultados, como por ejemplo, una función que suma dos números. Esto permite reutilizar código y hacer que el programa sea más eficiente y fácil de mantener. Al implementar funciones en el programa se pueden evitar repetir códigos y mejorar la organización del mismo.
+- `005-Programacion orientada a objetos` — 2025-09-16
+  - **Resumen:** En la clase de programación orientada a objetos, se enseñó que es posible crear bloques de código llamados clases, que pueden tener atributos y métodos. Estos atributos son como variables dentro de la clase, y los métodos son acciones o funciones que pueden ser realizadas por los objetos creados a partir de esa clase. Se trabajó con ejemplos prácticos, como el de un gato con su nombre y el de una nave en un videojuego, donde se visualizaron los conceptos de setters y getters para modificar y obtener valores de estos atributos, respectivamente.
+- `006-Ejercicios` — 2025-09-23
+  - **Resumen:** En la clase de programación, se abordó el tema de los tipos de datos y sus manipulaciones. Se aprendió a utilizar variables para almacenar información y realizar operaciones básicas. Además, se exploraron las estructuras de control condicional como si y switch, que permiten tomar decisiones en función de condiciones específicas. También se discutieron los conceptos de conversiones de datos y rango de valores, lo que facilita la toma de decisiones en los programas. La práctica con ejemplos como el simulacro del ejercicio 1 demostró cómo utilizar estas estructuras para lograr resultados deseados.
 
-Java - .jar
-Máquina virtual de Java
-
-Lenguajes compilados
-C++
-
-# Imparte la docencia en este módulo y cómo se evalúa
-
-En todo momento vamos a realizar ejercicios de código para demostrar el contenido de cada subunidad
-
-# Evaluación
-
-- 20% Ejercicios de cada subunidad
-- 20% Ejercicios de cada unidad
-- 50% Examen trimestral
-- 10% Actitud (Comportamiento en clase + Asistencia)
-
-
+## Unidad: `001-Programación multiproceso`
+- `002-Estados de un proceso. Planificación de procesos` — 2025-10-21
+  - **Resumen:** El concepto de estados de un proceso se refiere a la forma en que un proceso atraviesa diferentes fases, desde su creación hasta su finalización. Esto incluye estados como inicializado, listo, ejecutando, bloqueado y terminado. La planificación de procesos implica gestionar estos estados de manera eficiente para maximizar el rendimiento del sistema. Esto puede lograrse mediante técnicas como la asignación adecuada de recursos, el control de prioridades y la coordinación de interacciones entre diferentes procesos. Al entender los estados de un proceso y planificar su ejecución, se pueden reducir tiempos de respuesta, mejorar la utilización de recursos y evitar situaciones de bloqueo o congestión del sistema.
+- `003-Hilos` — 2025-10-21
+  - **Resumen:** En la clase correspondeciente a la subunidad "003-Hilos" se profundizó en la creación y utilización de hilos en programación, destacando la importancia del manejo eficiente de recursos computacionales para mejorar el rendimiento de las aplicaciones. Se exploraron casos prácticos donde la ejecución simultánea de tareas complejas mejora significativamente el tiempo de respuesta total de la aplicación.
+- `004-Programación concurrente` — 2025-10-21
+  - **Resumen:** En la clase de programación concurrente, se exploró la idea de que cuando se ejecutan varias tareas al mismo tiempo en un único núcleo del procesador, esto puede llevar a problemas de rendimiento y no aprovechar la potencia del dispositivo. Se discutió cómo los navegadores web, utilizando la API HTML Canvas, pueden realizar operaciones sobre imágenes de manera eficiente, pero también se mostró que si se ejecutan muchas operaciones como cambios en el color de cada pixel individualmente sin la ayuda de procesamiento concurrente, esto puede tener un impacto significativo en la velocidad y efectividad.
+- `005-Programación paralela y distribuida` — 2025-10-21 → 2025-10-28
+  - **Resumen:** Estos son varios códigos HTML y JavaScript que implementan diferentes efectos de procesamiento de imágenes utilizando múltiples hilos (workers). Aquí te presento una breve descripción de cada uno: **010-buckets.html**: Este código utiliza un enfoque por "buckets" para procesar la imagen. Crea cuadrados de tamaño fijo en toda la imagen y asigna a cada uno un worker para realizar el procesamiento. **011-desenfoque.html**: Este código agrega la capacidad de aplicar un efecto de desenfoque (Gaussian Blur) utilizando workers. Los trabajadores se utilizan para realizar una separación suave del enfoque, lo que mejora la calidad visual de la imagen procesada. **011-desenfoque.html** y **010-buckets.html** comparten algunas características similares, como el uso de múltiples hilos para mejorar la eficiencia del procesamiento de imágenes.
